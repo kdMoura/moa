@@ -23,7 +23,9 @@ package moa.tasks;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.PrintStream;
+import java.text.DecimalFormat;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import com.github.javacliparser.FileOption;
 import com.github.javacliparser.FlagOption;
@@ -37,6 +39,7 @@ import moa.core.Measurement;
 import moa.core.ObjectRepository;
 import moa.core.StringUtils;
 import moa.core.TimingUtils;
+import moa.core.Utils;
 import moa.evaluation.LearningEvaluation;
 import moa.evaluation.LearningPerformanceEvaluator;
 import moa.evaluation.preview.LearningCurve;
@@ -96,9 +99,14 @@ public class EvaluatePeriodicHeldOutTest extends ClassificationMainTask {
     public FlagOption cacheTestOption = new FlagOption("cacheTest", 'c',
             "Cache test instances in memory.");
 
+    public FileOption outputPredictionFileOption = new FileOption("outputPredictionFile", 'o',
+            "File to append output predictions to.", null, "pred", true);
+
+
     @Override
     protected Object doMainTask(TaskMonitor monitor, ObjectRepository repository) {
         Learner learner = (Learner) getPreparedClassOption(this.learnerOption);
+        String a = this.learnerOption.getValueAsCLIString();
         ExampleStream stream = (ExampleStream) getPreparedClassOption(this.streamOption);
         LearningPerformanceEvaluator evaluator = (LearningPerformanceEvaluator) getPreparedClassOption(this.evaluatorOption);
         learner.setModelContext(stream.getHeader());
@@ -118,6 +126,23 @@ public class EvaluatePeriodicHeldOutTest extends ClassificationMainTask {
             } catch (Exception ex) {
                 throw new RuntimeException(
                         "Unable to open immediate result file: " + dumpFile, ex);
+            }
+        }
+        //File for output predictions
+        File outputPredictionFile = this.outputPredictionFileOption.getFile();
+        PrintStream outputPredictionResultStream = null;
+        if (outputPredictionFile != null) {
+            try {
+                if (outputPredictionFile.exists()) {
+                    outputPredictionResultStream = new PrintStream(
+                            new FileOutputStream(outputPredictionFile, true), true);
+                } else {
+                    outputPredictionResultStream = new PrintStream(
+                            new FileOutputStream(outputPredictionFile), true);
+                }
+            } catch (Exception ex) {
+                throw new RuntimeException(
+                        "Unable to open prediction result file: " + outputPredictionFile, ex);
             }
         }
         boolean firstDump = true;
@@ -191,9 +216,41 @@ public class EvaluatePeriodicHeldOutTest extends ClassificationMainTask {
 					break;
 				}
                 Example testInst = (Example) testStream.nextInstance(); //.copy();
-                double trueClass = ((Instance) testInst.getData()).classValue();
+                //double trueClass = ((Instance) testInst.getData()).classValue();
                 //testInst.setClassMissing();
                 double[] prediction = learner.getVotesForInstance(testInst);
+
+
+                // Output prediction
+                if (outputPredictionFile != null) {
+                    // Format to 4 decimal places
+                    DecimalFormat decimalFormat = new DecimalFormat("0.0000");
+
+                    // Create the final string
+                    StringBuilder finalString = new StringBuilder("[");
+                    for (int i = 0; i < prediction.length; i++) {
+                        double formattedValue = prediction[i] / 300 / 100 ;
+                        if (Double.isInfinite(formattedValue)) {
+                            formattedValue = 1.0;
+                        } else if (Double.isNaN(formattedValue)) {
+                            formattedValue = 0.0;
+                        }
+                        String formattedString = decimalFormat.format(formattedValue);
+                        finalString.append(formattedString);
+                        if (i < prediction.length - 1) {
+                            finalString.append(", ");
+                        }
+                    }
+                    finalString.append("]");
+
+                    int trueClass = (int) ((Instance) testInst.getData()).classValue();
+                    outputPredictionResultStream.println(
+                            Utils.maxIndex(prediction) + "," + //prediction
+                            finalString + "," +//Arrays.toString(prediction) + "," + //probability prediction (sum acc of classifiers in ensemble
+                            (((Instance) testInst.getData()).classIsMissing() == true ? " ? " : trueClass)
+                    );
+                }
+
                 //testInst.setClassValue(trueClass);
                 evaluator.addResult(testInst, prediction);
                 testInstancesProcessed++;
@@ -284,6 +341,9 @@ public class EvaluatePeriodicHeldOutTest extends ClassificationMainTask {
         }
         if (immediateResultStream != null) {
             immediateResultStream.close();
+        }
+        if (outputPredictionResultStream != null) {
+            outputPredictionResultStream.close();
         }
         return learningCurve;
     }
