@@ -16,7 +16,7 @@
  *
  *    You should have received a copy of the GNU General Public License
  *    along with this program. If not, see <http://www.gnu.org/licenses/>.
- *    
+ *
  */
 package moa.tasks;
 
@@ -27,6 +27,9 @@ import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 import com.github.javacliparser.FileOption;
 import com.github.javacliparser.FlagOption;
 import com.github.javacliparser.IntOption;
@@ -93,6 +96,12 @@ public class EvaluatePeriodicHeldOutTest extends ClassificationMainTask {
             "Number of training examples between samples of learning performance.",
             100000, 0, Integer.MAX_VALUE);
 
+    public IntOption pretrainSize = new IntOption(
+            "pretrainSize",
+            'k',
+            "Number of examples for initial training.",
+            0, 0, Integer.MAX_VALUE);
+
     public FileOption dumpFileOption = new FileOption("dumpFile", 'd',
             "File to append intermediate csv results to.", null, "csv", true);
 
@@ -106,7 +115,7 @@ public class EvaluatePeriodicHeldOutTest extends ClassificationMainTask {
     @Override
     protected Object doMainTask(TaskMonitor monitor, ObjectRepository repository) {
         Learner learner = (Learner) getPreparedClassOption(this.learnerOption);
-        String a = this.learnerOption.getValueAsCLIString();
+
         ExampleStream stream = (ExampleStream) getPreparedClassOption(this.streamOption);
         LearningPerformanceEvaluator evaluator = (LearningPerformanceEvaluator) getPreparedClassOption(this.evaluatorOption);
         learner.setModelContext(stream.getHeader());
@@ -130,6 +139,7 @@ public class EvaluatePeriodicHeldOutTest extends ClassificationMainTask {
         }
         //File for output predictions
         File outputPredictionFile = this.outputPredictionFileOption.getFile();
+
         PrintStream outputPredictionResultStream = null;
         if (outputPredictionFile != null) {
             try {
@@ -175,12 +185,26 @@ public class EvaluatePeriodicHeldOutTest extends ClassificationMainTask {
         instancesProcessed = 0;
         TimingUtils.enablePreciseTiming();
         double totalTrainTime = 0.0;
+
+        boolean isPretrainDone = (this.pretrainSize.getValue() > 0 ? false : true);
         while ((this.trainSizeOption.getValue() < 1
                 || instancesProcessed < this.trainSizeOption.getValue())
                 && stream.hasMoreInstances() == true) {
-            monitor.setCurrentActivityDescription("Training...");
-            long instancesTarget = instancesProcessed
-                    + this.sampleFrequencyOption.getValue();
+
+            long instancesTarget = 0;
+
+            if (!isPretrainDone && this.pretrainSize.getValue() > 0){
+                monitor.setCurrentActivityDescription("Pre-training...");
+                instancesTarget = instancesProcessed
+                        + this.pretrainSize.getValue();
+                isPretrainDone = true;
+            }
+            else{
+                monitor.setCurrentActivityDescription("Training...");
+                instancesTarget = instancesProcessed
+                        + this.sampleFrequencyOption.getValue();
+            }
+
             long trainStartTime = TimingUtils.getNanoCPUTimeOfCurrentThread();
             while (instancesProcessed < instancesTarget && stream.hasMoreInstances() == true) {
                 learner.trainOnInstance(stream.nextInstance());
@@ -201,7 +225,7 @@ public class EvaluatePeriodicHeldOutTest extends ClassificationMainTask {
             }
 	    if (this.cacheTestOption.isSet()) {
                 testStream.restart();
-            } 
+            }
             evaluator.reset();
             long testInstancesProcessed = 0;
             monitor.setCurrentActivityDescription("Testing (after "
@@ -223,13 +247,29 @@ public class EvaluatePeriodicHeldOutTest extends ClassificationMainTask {
 
                 // Output prediction
                 if (outputPredictionFile != null) {
+
+                    /* workaround for saving a smaller size prediction file
+                        instead of saving the sum of all estimators proba prediction, save the mean.
+                        Filname ends with the number of estimators used.
+                     */
+                    String filename = this.outputPredictionFileOption.getValue();
+                    Pattern pattern = Pattern.compile("_(\\d+)\\.pred$");
+                    Matcher matcher = pattern.matcher(filename);
+                    int estimators = 0;
+                    if (matcher.find()) {
+                        String lastNumberString = matcher.group(1);
+                        estimators = Integer.parseInt(lastNumberString);
+                    }
+
                     // Format to 4 decimal places
                     DecimalFormat decimalFormat = new DecimalFormat("0.0000");
 
                     // Create the final string
-                    StringBuilder finalString = new StringBuilder("[");
+                    //Fields: model classification, model proba class 1, model proba class 2, true value
+                    StringBuilder finalString = new StringBuilder("");//new StringBuilder("[");
                     for (int i = 0; i < prediction.length; i++) {
-                        double formattedValue = prediction[i] / 300 / 100 ;
+
+                        double formattedValue = (estimators > 0 ? prediction[i] / estimators /100 : prediction[i]);
                         if (Double.isInfinite(formattedValue)) {
                             formattedValue = 1.0;
                         } else if (Double.isNaN(formattedValue)) {
@@ -238,10 +278,10 @@ public class EvaluatePeriodicHeldOutTest extends ClassificationMainTask {
                         String formattedString = decimalFormat.format(formattedValue);
                         finalString.append(formattedString);
                         if (i < prediction.length - 1) {
-                            finalString.append(", ");
+                            finalString.append(",");
                         }
                     }
-                    finalString.append("]");
+                    //finalString.append(",");
 
                     int trueClass = (int) ((Instance) testInst.getData()).classValue();
                     outputPredictionResultStream.println(
@@ -268,7 +308,7 @@ public class EvaluatePeriodicHeldOutTest extends ClassificationMainTask {
             double testTime = TimingUtils.nanoTimeToSeconds(TimingUtils.getNanoCPUTimeOfCurrentThread()
                     - testStartTime);
             List<Measurement> measurements = new ArrayList<Measurement>();
-            measurements.add(new Measurement("evaluation instances",            		
+            measurements.add(new Measurement("evaluation instances",
                     instancesProcessed));
             measurements.add(new Measurement("total train time", totalTrainTime));
             measurements.add(new Measurement("total train speed",
