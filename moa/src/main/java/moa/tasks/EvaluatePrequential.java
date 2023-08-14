@@ -23,6 +23,9 @@ package moa.tasks;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.PrintStream;
+import java.text.DecimalFormat;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import moa.capabilities.CapabilitiesHandler;
 import moa.capabilities.Capability;
@@ -199,9 +202,50 @@ public class EvaluatePrequential extends ClassificationMainTask implements Capab
             double[] prediction = learner.getVotesForInstance(testInst);
             // Output prediction
             if (outputPredictionFile != null) {
-                int trueClass = (int) ((Instance) trainInst.getData()).classValue();
-                outputPredictionResultStream.println(Utils.maxIndex(prediction) + "," + (
-                 ((Instance) testInst.getData()).classIsMissing() == true ? " ? " : trueClass));
+                /* workaround for saving a smaller size prediction file
+                        instead of saving the sum of all estimators proba prediction, save the mean.
+                        Filname ends with the number of estimators used.
+                     */
+                String filename = this.outputPredictionFileOption.getValue();
+                Pattern pattern = Pattern.compile("_(\\d+)\\.pred$");
+                Matcher matcher = pattern.matcher(filename);
+                int estimators = 0;
+                if (matcher.find()) {
+                    String lastNumberString = matcher.group(1);
+                    estimators = Integer.parseInt(lastNumberString);
+                }
+
+                // Format to 4 decimal places
+                DecimalFormat decimalFormat = new DecimalFormat("0.0000");
+
+                // Create the final string
+                //Fields: model classification, model proba class 1, model proba class 2, true value
+                StringBuilder finalString = new StringBuilder("");//new StringBuilder("[");
+                for (int i = 0; i < prediction.length; i++) {
+
+                    double formattedValue = (estimators > 0 ? prediction[i] / estimators /100 : prediction[i]);
+                    if (Double.isInfinite(formattedValue)) {
+                        formattedValue = 1.0;
+                    } else if (Double.isNaN(formattedValue)) {
+                        formattedValue = 0.0;
+                    }
+                    String formattedString = decimalFormat.format(formattedValue);
+                    finalString.append(formattedString);
+                    if (i < prediction.length - 1) {
+                        finalString.append(",");
+                    }
+                }
+                //finalString.append(",");
+
+                int trueClass = (int) ((Instance) testInst.getData()).classValue();
+                outputPredictionResultStream.println(
+                        Utils.maxIndex(prediction) + "," + //prediction
+                                finalString + "," +//Arrays.toString(prediction) + "," + //probability prediction (sum acc of classifiers in ensemble
+                                (((Instance) testInst.getData()).classIsMissing() == true ? " ? " : trueClass)
+                );
+                //int trueClass = (int) ((Instance) trainInst.getData()).classValue();
+                //outputPredictionResultStream.println(Utils.maxIndex(prediction) + "," + (
+                // ((Instance) testInst.getData()).classIsMissing() == true ? " ? " : trueClass));
             }
 
             //evaluator.addClassificationAttempt(trueClass, prediction, testInst.weight());
