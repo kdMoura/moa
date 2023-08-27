@@ -193,6 +193,23 @@ public class EvaluatePrequential extends ClassificationMainTask implements Capab
         long evaluateStartTime = TimingUtils.getNanoCPUTimeOfCurrentThread();
         long lastEvaluateStartTime = evaluateStartTime;
         double RAMHours = 0.0;
+
+        int estimators = 1;
+        if (outputPredictionFile != null) {
+                /* workaround for saving a smaller size prediction file
+                        instead of saving the sum of all estimators proba prediction, save the mean.
+                        Filname ends with the number of estimators used.
+                     */
+            String filename = this.outputPredictionFileOption.getValue();
+            Pattern pattern = Pattern.compile("_(\\d+)\\.pred$");
+            Matcher matcher = pattern.matcher(filename);
+            //int estimators = 0;
+            if (matcher.find()) {
+                String lastNumberString = matcher.group(1);
+                estimators = Integer.parseInt(lastNumberString);
+            }
+        }
+
         while (stream.hasMoreInstances()
                 && ((maxInstances < 0) || (instancesProcessed < maxInstances))
                 && ((maxSeconds < 0) || (secondsElapsed < maxSeconds))) {
@@ -202,39 +219,37 @@ public class EvaluatePrequential extends ClassificationMainTask implements Capab
             double[] prediction = learner.getVotesForInstance(testInst);
             // Output prediction
             if (outputPredictionFile != null) {
-                /* workaround for saving a smaller size prediction file
-                        instead of saving the sum of all estimators proba prediction, save the mean.
-                        Filname ends with the number of estimators used.
-                     */
-                String filename = this.outputPredictionFileOption.getValue();
-                Pattern pattern = Pattern.compile("_(\\d+)\\.pred$");
-                Matcher matcher = pattern.matcher(filename);
-                int estimators = 0;
-                if (matcher.find()) {
-                    String lastNumberString = matcher.group(1);
-                    estimators = Integer.parseInt(lastNumberString);
-                }
+
 
                 // Format to 4 decimal places
                 DecimalFormat decimalFormat = new DecimalFormat("0.0000");
 
                 // Create the final string
                 //Fields: model classification, model proba class 1, model proba class 2, true value
-                StringBuilder finalString = new StringBuilder("");//new StringBuilder("[");
-                for (int i = 0; i < prediction.length; i++) {
+                StringBuilder finalString = new StringBuilder("");
 
-                    double formattedValue = (estimators > 0 ? prediction[i] / estimators /100 : prediction[i]);
-                    if (Double.isInfinite(formattedValue)) {
-                        formattedValue = 1.0;
-                    } else if (Double.isNaN(formattedValue)) {
-                        formattedValue = 0.0;
+                if (prediction.length > 0) {
+                    for (int i = 0; i < prediction.length; i++) {
+                        double formattedValue = (estimators > 0 ? prediction[i] / estimators / 100 : prediction[i]);
+                        if (Double.isInfinite(formattedValue)) {
+                            formattedValue = 1.0;
+                        } else if (Double.isNaN(formattedValue)) {
+                            formattedValue = 0.0;
+                        }
+                        String formattedString = decimalFormat.format(formattedValue);
+                        finalString.append(formattedString);
+                        if (i < prediction.length - 1) {
+                            finalString.append(",");
+                        }
                     }
-                    String formattedString = decimalFormat.format(formattedValue);
-                    finalString.append(formattedString);
-                    if (i < prediction.length - 1) {
-                        finalString.append(",");
+                    // If prediction has only one element, append a comma and 0.0
+                    if (prediction.length == 1) {
+                        finalString.append(",").append("0.0"); // when it returns only prediction for clasx index 0
                     }
+                } else {
+                    finalString.append(",");
                 }
+
                 //finalString.append(",");
 
                 int trueClass = (int) ((Instance) testInst.getData()).classValue();
