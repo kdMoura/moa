@@ -37,12 +37,7 @@ import moa.capabilities.Capability;
 import moa.capabilities.ImmutableCapabilities;
 import moa.classifiers.Classifier;
 import moa.classifiers.MultiClassClassifier;
-import moa.core.Example;
-import moa.core.Measurement;
-import moa.core.ObjectRepository;
-import moa.core.StringUtils;
-import moa.core.TimingUtils;
-import moa.core.Utils;
+import moa.core.*;
 import moa.evaluation.LearningEvaluation;
 import moa.evaluation.LearningPerformanceEvaluator;
 import moa.evaluation.preview.LearningCurve;
@@ -238,7 +233,7 @@ public class EvaluatePeriodicHeldOutTest extends ClassificationMainTask {
             if (totalTrainTime > this.trainTimeOption.getValue()) {
                 break;
             }
-	    if (this.cacheTestOption.isSet()) {
+	        if (this.cacheTestOption.isSet()) {
                 testStream.restart();
             }
             evaluator.reset();
@@ -254,6 +249,7 @@ public class EvaluatePeriodicHeldOutTest extends ClassificationMainTask {
 				if (stream.hasMoreInstances() == false) {
 					break;
 				}
+
                 Example testInst = (Example) testStream.nextInstance(); //.copy();
                 //double trueClass = ((Instance) testInst.getData()).classValue();
                 //testInst.setClassMissing();
@@ -263,7 +259,13 @@ public class EvaluatePeriodicHeldOutTest extends ClassificationMainTask {
                 // Output prediction
                 if (outputPredictionFile != null) {
 
+                    DoubleVector v = new DoubleVector(prediction);
+                    v.addValues(new double[((Instance) testInst.getData()).numClasses()]); //Add zeros
+                    if (v.sumOfValues() > 0.0) {
+                        v.normalize();
+                    }
 
+                    double[] vote = v.getArrayRef();
 
                     // Format to 4 decimal places
                     DecimalFormat decimalFormat = new DecimalFormat("0.0000");
