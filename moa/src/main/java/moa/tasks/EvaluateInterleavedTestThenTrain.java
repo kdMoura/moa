@@ -27,10 +27,7 @@ import moa.capabilities.Capability;
 import moa.capabilities.ImmutableCapabilities;
 import moa.classifiers.Classifier;
 import moa.classifiers.MultiClassClassifier;
-import moa.core.Example;
-import moa.core.Measurement;
-import moa.core.ObjectRepository;
-import moa.core.TimingUtils;
+import moa.core.*;
 import moa.evaluation.LearningEvaluation;
 import moa.evaluation.LearningPerformanceEvaluator;
 import moa.evaluation.preview.LearningCurve;
@@ -94,6 +91,9 @@ public class EvaluateInterleavedTestThenTrain extends ClassificationMainTask {
     public FileOption dumpFileOption = new FileOption("dumpFile", 'd',
             "File to append intermediate csv reslts to.", null, "csv", true);
 
+    public FileOption outputPredictionFileOption = new FileOption("outputPredictionFile", 'o',
+            "File to append output predictions to.", null, "pred", true);
+
     @Override
     public Class<?> getTaskResultType() {
         return LearningCurve.class;
@@ -139,6 +139,24 @@ public class EvaluateInterleavedTestThenTrain extends ClassificationMainTask {
                         "Unable to open immediate result file: " + dumpFile, ex);
             }
         }
+        //File for output predictions
+        File outputPredictionFile = this.outputPredictionFileOption.getFile();
+        PrintStream outputPredictionResultStream = null;
+        if (outputPredictionFile != null) {
+            try {
+                if (outputPredictionFile.exists()) {
+                    outputPredictionResultStream = new PrintStream(
+                            new FileOutputStream(outputPredictionFile, true), true);
+                } else {
+                    outputPredictionResultStream = new PrintStream(
+                            new FileOutputStream(outputPredictionFile), true);
+                }
+            } catch (Exception ex) {
+                throw new RuntimeException(
+                        "Unable to open prediction result file: " + outputPredictionFile, ex);
+            }
+        }
+
         boolean firstDump = true;
         boolean preciseCPUTiming = TimingUtils.enablePreciseTiming();
         long evaluateStartTime = TimingUtils.getNanoCPUTimeOfCurrentThread();
@@ -154,6 +172,13 @@ public class EvaluateInterleavedTestThenTrain extends ClassificationMainTask {
             double[] prediction = learner.getVotesForInstance(testInst);
             //evaluator.addClassificationAttempt(trueClass, prediction, testInst
             //		.weight());
+            // Output prediction
+            if (outputPredictionFile != null) {
+                int trueClass = (int) ((Instance) trainInst.getData()).classValue();
+                outputPredictionResultStream.println(Utils.maxIndex(prediction) + "," + (
+                        ((Instance) testInst.getData()).classIsMissing() == true ? " ? " : trueClass));
+            }
+
             evaluator.addResult(testInst, prediction);
             learner.trainOnInstance(trainInst);
             instancesProcessed++;
@@ -216,6 +241,9 @@ public class EvaluateInterleavedTestThenTrain extends ClassificationMainTask {
         }
         if (immediateResultStream != null) {
             immediateResultStream.close();
+        }
+        if (outputPredictionResultStream != null) {
+            outputPredictionResultStream.close();
         }
         return learningCurve;
     }
