@@ -22,6 +22,10 @@ package moa.tasks;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.PrintStream;
+import java.util.Arrays;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.text.DecimalFormat;
 
 import moa.capabilities.Capability;
 import moa.capabilities.ImmutableCapabilities;
@@ -162,6 +166,7 @@ public class EvaluateInterleavedTestThenTrain extends ClassificationMainTask {
         long evaluateStartTime = TimingUtils.getNanoCPUTimeOfCurrentThread();
         long lastEvaluateStartTime = evaluateStartTime;
         double RAMHours = 0.0;
+
         while (stream.hasMoreInstances()
                 && ((maxInstances < 0) || (instancesProcessed < maxInstances))
                 && ((maxSeconds < 0) || (secondsElapsed < maxSeconds))) {
@@ -174,9 +179,44 @@ public class EvaluateInterleavedTestThenTrain extends ClassificationMainTask {
             //		.weight());
             // Output prediction
             if (outputPredictionFile != null) {
-                int trueClass = (int) ((Instance) trainInst.getData()).classValue();
-                outputPredictionResultStream.println(Utils.maxIndex(prediction) + "," + (
-                        ((Instance) testInst.getData()).classIsMissing() == true ? " ? " : trueClass));
+
+                // Format to 4 decimal places
+                DecimalFormat decimalFormat = new DecimalFormat("0.0000");
+
+                // Create the final string
+                //Fields: model classification, model proba class 1, model proba class 2, true value
+                StringBuilder finalString = new StringBuilder("");
+
+                if (prediction.length > 0) {
+                    double total = Arrays.stream(prediction).sum();
+                    for (int i = 0; i < prediction.length; i++) {
+                        double formattedValue =prediction[i] / total;
+                        if (Double.isInfinite(formattedValue)) {
+                            formattedValue = 1.0;
+                        } else if (Double.isNaN(formattedValue)) {
+                            formattedValue = 0.0;
+                        }
+                        String formattedString = decimalFormat.format(formattedValue);
+                        finalString.append(formattedString);
+                        if (i < prediction.length - 1) {
+                            finalString.append(",");
+                        }
+                    }
+                    // If prediction has only one element, append a comma and 0.0
+                    if (prediction.length == 1) {
+                        finalString.append(",").append("0.0"); // when it returns only prediction for clasx index 0
+                    }
+                } else {
+                    finalString.append(",");
+                }
+
+                int trueClass = (int) ((Instance) testInst.getData()).classValue();
+                outputPredictionResultStream.println(
+                        Utils.maxIndex(prediction) + "," + //prediction
+                                finalString + "," +//Arrays.toString(prediction) + "," + //probability prediction (sum acc of classifiers in ensemble
+                                (((Instance) testInst.getData()).classIsMissing() == true ? " ? " : trueClass)
+                );
+
             }
 
             evaluator.addResult(testInst, prediction);
